@@ -4,9 +4,28 @@ variable { α: Type }
 
 def period (w: List α) (p: Nat) := ∀ (i : Nat) (h: i + p < w.length), w[i] = w[i + p]
 
+
 theorem period_0 (w: List α) : period w 0 := by
   rw [period]
   simp
+
+theorem period_mul (w: List α) (p k: Nat) (hp: period w p) : period w (p * k) := by
+  rw [period]
+  rw [period] at hp
+  induction k with
+  | zero => simp
+  | succ n a =>
+    intro i hi
+    have h_pi_next_len : i + p * n + p < w.length := by
+      rw [Nat.left_distrib] at hi
+      omega
+    have h_pi_len : i + p * n < w.length := by
+      rw [Nat.left_distrib] at hi
+      omega
+    have h_pi : w[i] = w[i + p * n] := by apply a
+    have h_pi_next : w[i + p * n] = w[i + p * n + p] := by apply hp
+    have h_final : w[i] = w[i + p * (n + 1)] := by simp_all [Nat.left_distrib, Nat.add_assoc]
+    exact h_final
 
 -- aabaaabaa has period 4, 7, 8, 9
 example : period [0, 0, 1, 0, 0, 0, 1, 0, 0] 4 := by rw [period]; simp_all +arith +decide
@@ -35,7 +54,18 @@ theorem gcd_diff (p q: Nat) (h: p ≤ q) : p.gcd q = (q-p).gcd p := by
   rw [Nat.gcd_rec p q] -- (p, q) = (q % p, p)
   rw [@Nat.mod_eq_sub_mod q p h] -- ((q - p) % p, p) = (q % p, p)
 
-theorem gcd_le_diff (p q: Nat) (h: p < q) : q - p ≥ p.gcd q := by sorry
+theorem dvd_le (d x: Nat) (h₁ : d ∣ x) (h₂: 0 < x) : d ≤ x := by
+  obtain ⟨k, hk⟩ := h₁
+  rw [hk]
+  by_cases k = 0
+  { simp_all }
+  have k_pos : (k > 0) := by omega
+  apply Nat.le_mul_of_pos_right
+  exact k_pos
+
+theorem gcd_le_diff (p q: Nat) (h: p < q) : q - p ≥ p.gcd q := by
+  have gcd_dvd_suv : (p.gcd q) ∣ (q - p) := by simp_all [Nat.dvd_sub, Nat.gcd_dvd_left, Nat.gcd_dvd_right]
+  simp_all [dvd_le]
 
 theorem fine_wilf_suffix_diff
   (w: List α) (p q: Nat)
@@ -52,9 +82,82 @@ theorem fine_wilf_suffix_diff
   simp_all
 
 theorem fine_wilf_suffix_div
-  (w: List α) (p d: Nat)
-  (hp: period w p) (hd: period (w.drop p) d) (hd: d ∣ p) (hlen: w.length ≥ 2 * p) : period w d := by
-  sorry
+  (w: List α) (p d: Nat) (h_p_pos: p > 0)
+  (hp: period w p) (hd: period (w.drop p) d) (hdiv: d ∣ p) (hlen: w.length ≥ 2 * p) : period w d := by
+  rw [period]
+  intro i h_i
+  by_cases i ≥ p
+  {
+    rw [period] at hd
+    simp_all [hd, List.drop_length]
+    let j := i - p
+    have hjlen : j + d < w.length - p := by omega
+    let hj := hd j hjlen
+    have lhs : (p + j) = i := by omega
+    have lhs2 : w[(p + j)] = w[i] := by simp_all
+    have rhs : (p + (j + d)) = i + d := by omega
+    have rhs2 : w[(p + (j + d))] = w[i + d] := by simp_all
+    rw [lhs2, rhs2] at hj
+    exact hj
+  }
+  have h_i_p : w[i] = w[i + p] := by apply hp
+  obtain ⟨k, hk⟩ := hdiv
+
+  have k_pos : (k ≥ 1) := by
+    by_contra nh
+    have k_zero : (k = 0) := by simp_all
+    have p_zero : (p = 0) := by simp_all
+    rw [p_zero] at h_p_pos
+    simp_all
+
+  have h_i_kd : i + k * d = i + p := by simp_all [Nat.mul_comm]
+  have h_suff_p : period (w.drop p) (p - d) := by
+    have pd : (p - d) = d * (k - 1) := by
+      rw [hk]
+      rw [Nat.mul_sub_left_distrib, Nat.mul_one]
+    simp_all [List.drop_length, period_mul]
+  by_cases i < p ∧ i < w.length - p - d
+  {
+    have h_i_p_d_len : i + d + p < w.length := by omega
+    have h_i_p_d : w[i + d] = w[i + d + p] := by apply hp
+    have h_i_p_d_eq : w[i + p] = w[i + d + p] := by
+      rw [period] at hd
+      simp_all [hd, List.drop_length, Nat.add_comm]
+      apply hd
+      omega
+    simp_all
+  }
+  by_cases h: (i < p ∧ i ≥ w.length - p - d)
+  {
+    have h_i_d_len : i + d ≥ w.length - p := by omega
+    have h_i_p : w[i] = w[i + p] := by apply hp
+    have h_i_d : w[i + p] = w[i + d] := by
+      rw [period] at h_suff_p
+      simp_all
+      let j := i + d - p
+      have bound : j + (d * k - d) < w.length - d * k := by omega
+      have index : p + j + d * (k - 1) < w.length := by
+        simp_all [Nat.mul_sub_left_distrib]
+        omega
+      have h_pj : p + j = i + d := by omega
+      have h_pjd : p + j + d * (k - 1) = i + p := by
+        simp_all [Nat.mul_sub_left_distrib, Nat.add_assoc, Nat.add_sub_of_le, k_pos]
+        rw [Nat.add_sub_of_le]
+        nth_rewrite 1 [← Nat.mul_one d]
+        apply Nat.mul_le_mul_left
+        apply k_pos
+      have x : w[p + j] = w[p + j + d * (k - 1)] := by
+        simp_all [Nat.mul_sub_left_distrib, Nat.add_assoc]
+      have y : w[i + d] = w[i + p] := by
+        have h1 : w[p + j] = w[i + d] := by
+          congr
+        have h2 : w[p + j + d * (k - 1)] = w[i + p] := by
+          congr
+        rw [← h1, x, ← h2]
+      simp_all
+    simp_all
+  }
+  omega
 
 -- Prod.lex constructs WellFounded relation - let's define it to simplify reasoning
 def NatNatLT := (Prod.lex Nat.lt_wfRel Nat.lt_wfRel)
@@ -74,7 +177,7 @@ theorem gcd_diff_induction
   (m n : Nat)
   (Hcomm : ∀ m n, P (m, n) ↔ P (n, m))
   (H0 : ∀n, P (0, n))
-  (H1 : ∀ m n, 0 < m → m ≤ n → P ((n - m), m) → P (m, n)) : P (m, n) := by
+  (H1 : ∀ m n, 0 < m → 0 < n → m ≤ n → P ((n - m), m) → P (m, n)) : P (m, n) := by
   induction (m, n) using @WellFounded.induction (Nat×Nat) NatNatLT.rel with
   | hwf => exact NatNatLT.wf
   | h x ih =>
@@ -92,7 +195,7 @@ theorem gcd_diff_induction
         apply nat_nat_m_diff_n_1
         exact n_pos
         trivial
-      have P_n_m : P (n, m) := H1 n m n_pos h_leq P_m_diff_n
+      have P_n_m : P (n, m) := H1 n m n_pos m_pos h_leq P_m_diff_n
       simp_all [P_n_m]
     }
     by_cases h_gt: (n > m)
@@ -105,7 +208,7 @@ theorem gcd_diff_induction
         exact m_pos
         trivial
       have P_n_diff_m_comm : P ((n - m), m) := by simp_all [Hcomm, P_n_diff_m]
-      have P_m_n : P (m, n) := H1 m n m_pos h_leq P_n_diff_m_comm
+      have P_m_n : P (m, n) := H1 m n m_pos n_pos h_leq P_n_diff_m_comm
       simp_all [P_m_n]
     }
     simp_all
@@ -113,12 +216,31 @@ theorem gcd_diff_induction
 def fine_wilf_prop (x: Nat×Nat) :=
   ∀ (w: List α), (period w x.fst) → (period w x.snd) → (w.length ≥ x.fst + x.snd - (x.fst.gcd x.snd)) → period w (x.fst.gcd x.snd)
 
-lemma fine_wilf_zero (n: Nat) : @fine_wilf_prop α (0, n) := by sorry
-lemma fine_wilf_comm (m n: Nat) : @fine_wilf_prop α (m, n) ↔ @fine_wilf_prop α (n, m) := by sorry
+lemma fine_wilf_zero (n: Nat) : @fine_wilf_prop α (0, n) := by
+  rw [fine_wilf_prop]
+  simp_all
+lemma fine_wilf_comm (m n: Nat) : @fine_wilf_prop α (m, n) ↔ @fine_wilf_prop α (n, m) := by
+  rw [fine_wilf_prop, fine_wilf_prop]
+  simp_all
+  apply Iff.intro
+    (fun a => by
+      intro w hn hm hlen
+      have hlen2 : m + n ≤ w.length + (m.gcd n) := by simp_all [Nat.gcd_comm, hlen]; omega
+      have hp : period w (m.gcd n) := by apply a w hm hn hlen2
+      have hp : period w (n.gcd m) := by simp_all [Nat.gcd_comm]
+      exact hp
+    )
+    (fun a => by
+      intro w hm hn hlen
+      have hlen2 : n + m ≤ w.length + (n.gcd m) := by simp_all [Nat.gcd_comm, hlen]; omega
+      have hp : period w (n.gcd m) := by apply a w hn hm hlen2
+      have hp : period w (m.gcd n) := by simp_all [Nat.gcd_comm]
+      exact hp
+    )
 
 theorem fine_wilf (x: Nat×Nat) : @fine_wilf_prop α x := by
   apply gcd_diff_induction fine_wilf_prop x.fst x.snd fine_wilf_comm fine_wilf_zero
-  intro p q h_p_pos h_p_le_q ih
+  intro p q h_p_pos h_q_pos h_p_le_q ih
   intro w h_p h_q h_len
   have h_len: w.length ≥ p + q - (p.gcd q) := by simp_all
   by_cases h_p_lt_q : (p < q)
@@ -145,7 +267,7 @@ theorem fine_wilf (x: Nat×Nat) : @fine_wilf_prop α x := by
     have h_gcd_suff_qp : period (w.drop p) (q.gcd p) := by simp_all
     have h_gcd_suff_pq : period (w.drop p) (p.gcd q) := by simp_all [Nat.gcd_comm]
     have h_final : period w (p.gcd q) := by
-      apply fine_wilf_suffix_div w p (p.gcd q) h_p h_gcd_suff_pq (Nat.gcd_dvd_left p q) h_len_strong
+      apply fine_wilf_suffix_div w p (p.gcd q) h_p_pos h_p h_gcd_suff_pq (Nat.gcd_dvd_left p q) h_len_strong
     exact h_final
   }
   by_cases h_p_eq_q : (p = q)
