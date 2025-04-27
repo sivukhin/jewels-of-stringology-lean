@@ -6,3 +6,5 @@ Lean4 proof of basic stringology facts:
     * Definition as morphic word
     * Definition through recursive negation
     * Eqivalence of definitions
+3. [Fibonacci word](](https://en.wikipedia.org/wiki/Fibonacci_word)
+    * Basic definition
