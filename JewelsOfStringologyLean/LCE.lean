@@ -2,6 +2,7 @@ import Mathlib.Combinatorics.Pigeonhole
 import Mathlib.Data.Fintype.BigOperators
 import Mathlib.Data.Fintype.Powerset
 import Mathlib.Data.Nat.Log
+import Mathlib.Order.Interval.Finset.Nat
 
 /-! ## Cell-probe LCE lower bound formalization
 
@@ -18,10 +19,8 @@ which proves S(n) * T(n) = Ω(n log n) in the cell-probe model.
 - `counting_bound` — injection bound for identified subfamilies
 - `family_card` — construction of the dictionary family
 - `pigeonhole_probes` — pigeonhole on probe sets
-- `lce_tradeoff` — chains the intermediate lemmas (main theorem)
-
-**Remaining `sorry`:**
 - `identifying_set` — core argument via LCE queries on block decomposition
+- `lce_tradeoff` — chains the intermediate lemmas (main theorem)
 -/
 
 /-- A string of length `n` over a finite alphabet of size `σ`. -/
@@ -235,10 +234,9 @@ theorem family_card {σ n k : Nat}
 /-- Pigeonhole on encodings: there exists an encoding class (strings sharing the
     same encoding) of size at least `|F| / n^S`. Each encoding is a `State S n`,
     giving at most `n^S` distinct encodings. -/
-theorem pigeonhole_encoding {σ n k : Nat}
+theorem pigeonhole_encoding {σ n : Nat}
     (A : CellProbeLCE σ n)
-    (F : Finset (Str σ n))
-    (hF : (↑F : Set (Str σ n)) ⊆ DictFamily σ n k) :
+    (F : Finset (Str σ n)) :
     ∃ (I : Finset (Str σ n)),
       (↑I : Set (Str σ n)) ⊆ ↑F ∧
       I.card ≥ F.card / n ^ A.S ∧
@@ -269,6 +267,14 @@ theorem pigeonhole_encoding {σ n k : Nat}
 def stringProbesOf {S n : Nat} (probes : Finset (Fin S ⊕ Fin n)) : Finset (Fin n) :=
   probes.biUnion (fun p => match p with | .inr j => {j} | .inl _ => ∅)
 
+theorem stringProbesOf_card_le {S n : Nat} (probes : Finset (Fin S ⊕ Fin n)) :
+    (stringProbesOf probes).card ≤ probes.card := by
+  unfold stringProbesOf
+  calc (probes.biUnion _).card
+      ≤ probes.card * 1 :=
+        Finset.card_biUnion_le_card_mul _ _ 1 (fun a _ => by cases a <;> simp)
+    _ = probes.card := Nat.mul_one _
+
 /-- If two strings share encoding and agree on all string probes, the sum oracles
     agree on the probed positions. This is the key link between ProbeTree and LCE. -/
 theorem sumOracle_agree_of_string_agree {S σ n : Nat}
@@ -296,7 +302,160 @@ theorem identifying_set {σ n k : Nat}
     (hk : k ≥ 1) :
     ∀ s ∈ I, ∃ (Ts : Finset (Fin n)),
       Ts.card ≤ A.T * n / k ∧
-      ∀ s' ∈ I, (∀ p ∈ Ts, s' p = s p) → s' = s := by sorry
+      ∀ s' ∈ I, (∀ p ∈ Ts, s' p = s p) → s' = s := by
+  classical
+  intro s hs
+  have hDP := hDict (Finset.mem_coe.mpr hs)
+  -- Edge case: n = 0
+  by_cases hn0 : n = 0
+  · subst hn0; exact ⟨∅, by simp, fun s' _ _ => funext fun x => x.elim0⟩
+  -- σ must be positive (otherwise Fin σ is empty but Fin n is nonempty)
+  have hσ_pos : σ > 0 := Nat.pos_of_ne_zero (by intro h; subst h; exact absurd (s ⟨0, by omega⟩).isLt (by omega))
+  have hsk_pos : σ ^ k ≥ 1 := Nat.one_le_pow k σ hσ_pos
+  have hpk : σ ^ k * k ≤ n := hDP.1
+  -- Define the word at block q of s
+  let tailWord : Nat → Fin k → Fin σ := fun q ⟨i, _⟩ =>
+    if h : q * k + i < n then s ⟨q * k + i, h⟩ else ⟨0, hσ_pos⟩
+  -- Define block probes for block q
+  let blockProbes : Nat → Finset (Fin n) := fun q =>
+    if hq : q * k < n then
+      stringProbesOf ((A.queryTree ((hDP.2 (tailWord q)).choose.val * k) (q * k)).probedPositions
+        (sumOracle (A.encode s) s))
+    else ∅
+  -- Define Ts as union over tail block indices
+  let Ts := (Finset.Ico (σ ^ k) (n / k + 1)).biUnion blockProbes
+  refine ⟨Ts, ?card_bound, ?correctness⟩
+  case card_bound =>
+    -- Each blockProbes q has card ≤ A.T
+    have hbp_card : ∀ q ∈ Finset.Ico (σ ^ k) (n / k + 1), (blockProbes q).card ≤ A.T := by
+      intro q _
+      show (blockProbes q).card ≤ A.T
+      simp only [blockProbes]
+      split
+      · calc (stringProbesOf _).card
+            ≤ (ProbeTree.probedPositions _ _).card := stringProbesOf_card_le _
+          _ ≤ A.T := ProbeTree.probes_le_depth (A.depthBound _ _) _
+      · simp
+    calc Ts.card
+        ≤ (Finset.Ico (σ ^ k) (n / k + 1)).card * A.T :=
+          Finset.card_biUnion_le_card_mul _ _ _ hbp_card
+      _ ≤ (n / k) * A.T := by
+          apply Nat.mul_le_mul_right
+          simp; omega
+      _ = A.T * (n / k) := Nat.mul_comm _ _
+      _ ≤ A.T * n / k := by
+          rw [Nat.le_div_iff_mul_le (by omega : k > 0)]
+          calc A.T * (n / k) * k
+              = A.T * ((n / k) * k) := by rw [Nat.mul_assoc]
+            _ ≤ A.T * n := Nat.mul_le_mul_left _ (Nat.div_mul_le_self n k)
+  case correctness =>
+    intro s' hs' hagree
+    funext ⟨i, hi⟩
+    by_cases h_pref : i < σ ^ k * k
+    · -- Position in dictionary prefix: shared by all strings in I
+      exact (hShared s hs s' hs' ⟨i, hi⟩ h_pref).symm
+    · -- Position in the tail
+      push_neg at h_pref
+      have hq_ge : i / k ≥ σ ^ k := (Nat.le_div_iff_mul_le (by omega : k > 0)).mpr h_pref
+      have hqk_le_i : i / k * k ≤ i := Nat.div_mul_le_self i k
+      have hqk_lt : i / k * k < n := by omega
+      have hq_le_nk : i / k ≤ n / k := Nat.div_le_div_right (by omega : i ≤ n)
+      -- q = i/k is in the Ico range
+      have hq_mem : i / k ∈ Finset.Ico (σ ^ k) (n / k + 1) := by
+        simp [Finset.mem_Ico]; omega
+      -- blockProbes (i/k) ⊆ Ts
+      have hbp_sub : blockProbes (i / k) ⊆ Ts :=
+        Finset.subset_biUnion_of_mem blockProbes hq_mem
+      -- s' agrees on blockProbes (i/k)
+      have hagree_bp : ∀ p ∈ blockProbes (i / k), s' p = s p :=
+        fun p hp => hagree p (hbp_sub hp)
+      -- Unfold blockProbes since (i/k) * k < n
+      have hbp_eq : blockProbes (i / k) =
+          stringProbesOf ((A.queryTree ((hDP.2 (tailWord (i / k))).choose.val * k) (i / k * k)).probedPositions
+            (sumOracle (A.encode s) s)) := by
+        show blockProbes (i / k) = _
+        simp only [blockProbes, hqk_lt, ↓reduceDIte]
+      -- Dictionary entry for block i/k
+      set p_w := (hDP.2 (tailWord (i / k))).choose with p_w_def
+      have hp_w := (hDP.2 (tailWord (i / k))).choose_spec
+      -- Key linearized bound: p_w.val * k + k ≤ σ ^ k * k
+      have hpw_k_bound : p_w.val * k + k ≤ σ ^ k * k := by
+        have h1 := Nat.mul_le_mul_right k (show p_w.val + 1 ≤ σ ^ k from p_w.isLt)
+        have h2 := Nat.add_mul p_w.val 1 k  -- (p_w.val + 1) * k = p_w.val * k + 1 * k
+        omega
+      -- The LCE result for s
+      set len := (A.queryTree (p_w.val * k) (i / k * k)).eval (sumOracle (A.encode s) s) with len_def
+      have hlce_s := A.correct s (p_w.val * k) (i / k * k)
+      -- i = (i/k)*k + (i%k) — linearized form for omega
+      have hij : i / k * k + i % k = i := by
+        have := Nat.div_add_mod i k; rw [Nat.mul_comm k (i / k)] at this; exact this
+      -- len ≥ min(k, n - (i/k)*k): dictionary entries match s on block i/k
+      have hlen_ge : len ≥ min k (n - i / k * k) := by
+        by_contra hlen_lt
+        push_neg at hlen_lt
+        have hlen_lt_k : len < k := lt_of_lt_of_le hlen_lt (Nat.min_le_left _ _)
+        have hlen_lt_rem : len < n - i / k * k := lt_of_lt_of_le hlen_lt (Nat.min_le_right _ _)
+        -- At position len: both indices in bounds
+        have hp_bound : p_w.val * k + len < n := by omega
+        have hq_bound : i / k * k + len < n := by omega
+        -- Dictionary match: s[p_w*k + len] = tailWord
+        have hmatch1 : s ⟨p_w.val * k + len, hp_bound⟩ = tailWord (i / k) ⟨len, hlen_lt_k⟩ :=
+          hp_w ⟨len, hlen_lt_k⟩ hp_bound
+        -- tailWord = s[q*k + len]
+        have hmatch2 : tailWord (i / k) ⟨len, hlen_lt_k⟩ = s ⟨i / k * k + len, hq_bound⟩ := by
+          simp only [tailWord, hq_bound, ↓reduceDIte]
+        -- So characters match at position len
+        have hmatch : s ⟨p_w.val * k + len, hp_bound⟩ = s ⟨i / k * k + len, hq_bound⟩ := by
+          rw [hmatch1, hmatch2]
+        -- But lceExact says they differ
+        rcases hlce_s.2.2.2 with h1 | h2 | ⟨_, _, hne⟩
+        · omega
+        · omega
+        · exact hne hmatch
+      -- The LCE query returns the same value for s' (shared encoding + agreement on probes)
+      have heval_eq : (A.queryTree (p_w.val * k) (i / k * k)).eval
+          (sumOracle (A.encode s) s') =
+          (A.queryTree (p_w.val * k) (i / k * k)).eval
+          (sumOracle (A.encode s) s) := by
+        apply sumOracle_agree_of_string_agree
+        intro j hj
+        have : j ∈ blockProbes (i / k) := by rw [hbp_eq]; exact hj
+        exact hagree_bp j this
+      -- So lceExact holds for s' with the same len
+      have hlce_s' : lceExact s' (p_w.val * k) (i / k * k) len := by
+        have henc : A.encode s' = A.encode s := hI_enc s' hs' s hs
+        have h := A.correct s' (p_w.val * k) (i / k * k)
+        rw [henc] at h
+        rw [heval_eq] at h
+        exact h
+      -- i%k < k and i%k < n - (i/k)*k
+      have hj_lt_k : i % k < k := Nat.mod_lt i (by omega)
+      have hj_lt_rem : i % k < n - i / k * k := by omega
+      have hj_lt_len : i % k < len := by
+        have := Nat.min_le_left k (n - i / k * k)
+        have := Nat.min_le_right k (n - i / k * k)
+        omega
+      -- Bounds for positions used in the chain
+      have hpw_i_lt : p_w.val * k + i % k < n := by omega
+      have hqk_i_lt : i / k * k + i % k < n := by omega
+      -- From lceExact on s': s'[p_w*k + i%k] = s'[(i/k)*k + i%k]
+      have hlce_match_s' : s' ⟨p_w.val * k + i % k, hpw_i_lt⟩ = s' ⟨i / k * k + i % k, hqk_i_lt⟩ :=
+        hlce_s'.2.2.1 (i % k) hj_lt_len hpw_i_lt hqk_i_lt
+      -- s'[p_w*k + i%k] = s[p_w*k + i%k] (both in dictionary prefix)
+      have hshared_pw : s' ⟨p_w.val * k + i % k, hpw_i_lt⟩ = s ⟨p_w.val * k + i % k, hpw_i_lt⟩ :=
+        hShared s' hs' s hs ⟨p_w.val * k + i % k, hpw_i_lt⟩
+          (Nat.lt_of_lt_of_le (Nat.add_lt_add_left hj_lt_k _) hpw_k_bound)
+      -- From lceExact on s: s[p_w*k + i%k] = s[(i/k)*k + i%k]
+      have hlce_match_s : s ⟨p_w.val * k + i % k, hpw_i_lt⟩ = s ⟨i / k * k + i % k, hqk_i_lt⟩ :=
+        hlce_s.2.2.1 (i % k) hj_lt_len hpw_i_lt hqk_i_lt
+      -- Chain: s'[i] = s'[(i/k)*k + i%k] = s'[p_w*k + i%k] = s[p_w*k + i%k] = s[(i/k)*k + i%k] = s[i]
+      have hi_eq : (⟨i, hi⟩ : Fin n) = ⟨i / k * k + i % k, hqk_i_lt⟩ := Fin.ext hij.symm
+      rw [show s' ⟨i, hi⟩ = s' ⟨i / k * k + i % k, hqk_i_lt⟩ from congrArg s' hi_eq]
+      rw [show s ⟨i, hi⟩ = s ⟨i / k * k + i % k, hqk_i_lt⟩ from congrArg s hi_eq]
+      calc s' ⟨i / k * k + i % k, _⟩
+          = s' ⟨p_w.val * k + i % k, _⟩ := hlce_match_s'.symm
+        _ = s ⟨p_w.val * k + i % k, _⟩ := hshared_pw
+        _ = s ⟨i / k * k + i % k, _⟩ := hlce_match_s
 
 /-- Pigeonhole on probe sets: there is a subfamily sharing the same probe set.
     Uses `identifying_set` to get per-string identifying sets, then pigeonholes
@@ -390,7 +549,7 @@ theorem lce_tradeoff {σ n k : Nat}
   -- Step 1: Construct the dictionary family
   obtain ⟨F, hF_sub, hF_card, hF_shared⟩ := family_card hσ hk hn
   -- Step 2: Pigeonhole on encodings — find encoding class I ⊆ F
-  obtain ⟨I, hI_sub, hI_card, hI_enc⟩ := pigeonhole_encoding A F hF_sub
+  obtain ⟨I, hI_sub, hI_card, hI_enc⟩ := pigeonhole_encoding A F
   -- Derive properties of I from F
   have hI_dict : (↑I : Set (Str σ n)) ⊆ DictFamily σ n k :=
     Set.Subset.trans (by exact_mod_cast hI_sub) hF_sub
