@@ -645,3 +645,85 @@ theorem lce_tradeoff {σ n k : Nat}
     omega
   -- Contradiction: 4*A.T + 1 ≤ n/4 ≤ 3*A.T ⟹ A.T + 1 ≤ 0
   omega
+
+/-- **Unconditional tradeoff (exponential form).**
+    For any cell-probe LCE data structure over `Str σ n`, the encoding size `S`
+    and query time `T` satisfy: `σ^(n/2) / (n^S · 2^n) ≤ σ^(T·n/k)`.
+    Taking logarithms informally: `S · log(n) + T · (n/k) · log(σ) ≥ (n/2) · log(σ) − n`,
+    which captures the `S · T = Ω(n · log σ)` trade-off from Kosolobov's paper. -/
+theorem lce_tradeoff_unconditional {σ n k : Nat}
+    (hσ : σ ≥ 2) (hk : k ≥ 1) (hn : 2 * σ ^ k * k ≤ n)
+    (A : CellProbeLCE σ n) :
+    σ ^ (n / 2) / (n ^ A.S * 2 ^ n) ≤ σ ^ (A.T * n / k) := by
+  obtain ⟨F, hF_sub, hF_card, hF_shared⟩ := family_card hσ hk hn
+  obtain ⟨I, hI_sub, hI_card, hI_enc⟩ := pigeonhole_encoding A F
+  have hI_dict : (↑I : Set (Str σ n)) ⊆ DictFamily σ n k :=
+    Set.Subset.trans (by exact_mod_cast hI_sub) hF_sub
+  have hI_shared : ∀ s ∈ I, ∀ s' ∈ I, ∀ (i : Fin n), i.val < σ ^ k * k → s i = s' i :=
+    fun s hs s' hs' i hi => hF_shared s (hI_sub hs) s' (hI_sub hs') i hi
+  obtain ⟨I', T_common, hI'_sub, hI'_card, hT_card, hI'_ident⟩ :=
+    pigeonhole_probes (k := k) A I hI_enc hI_dict hI_shared hk
+  have hcount := counting_bound I' T_common hI'_ident
+  calc σ ^ (n / 2) / (n ^ A.S * 2 ^ n)
+      ≤ F.card / (n ^ A.S * 2 ^ n) := Nat.div_le_div_right hF_card
+    _ = (F.card / n ^ A.S) / 2 ^ n := by rw [Nat.div_div_eq_div_mul]
+    _ ≤ I.card / 2 ^ n := Nat.div_le_div_right hI_card
+    _ ≤ I'.card := hI'_card
+    _ ≤ σ ^ T_common.card := hcount
+    _ ≤ σ ^ (A.T * n / k) := Nat.pow_le_pow_right (by omega) hT_card
+
+/-- **Kosolobov's Theorem (finite form): `4 · S(n) · T(n) ≥ n · ⌊log_σ(n) / 2⌋`.**
+    In the cell-probe model, the space in bits is `S(n) = A.S · ⌈log₂ n⌉`
+    (each of the `A.S` encoding cells stores a value in `Fin n`, requiring
+    `Nat.clog 2 n` bits). The paper proves `S(n) · T(n) = Ω(n log n)` under:
+    1. `σ ≥ 2^{8⌈S(n)/n⌉}` — alphabet large relative to space
+    2. `S(n) = Ω(n)` — at least linear space
+
+    Condition (1) is encoded by `hS`. Condition (2) is `hSn`.
+
+    The proof internally chooses `k = ⌊log_σ(n) / 2⌋` (the paper's parameter),
+    verifies `lce_tradeoff` conditions to get `4T ≥ k`, then combines with
+    `S(n) ≥ n` to conclude `4 · S(n) · T ≥ S(n) · k ≥ n · k`.
+    Since `k = ⌊log_σ(n) / 2⌋ = Ω(log n / log σ)`, this captures
+    `S(n) · T(n) = Ω(n log_σ n)`, the paper's main trade-off.
+    When `n < σ²` the bound is vacuously `≥ 0`. -/
+theorem lce_paper_theorem {σ n : Nat}
+    (hσ : σ ≥ 2)
+    (A : CellProbeLCE σ n)
+    (hS : n ^ A.S * 2 ^ n ≤ σ ^ (n / 4))
+    (hSn : A.S * Nat.clog 2 n ≥ n) :
+    4 * (A.S * Nat.clog 2 n * A.T) ≥ n * (Nat.log σ n / 2) := by
+  -- Choose k = ⌊log_σ(n) / 2⌋
+  set k := Nat.log σ n / 2
+  -- When k = 0 (i.e., n < σ²), the bound is trivially ≥ 0
+  by_cases hk : k ≥ 1 <;> [skip; simp_all]
+  have hlog : 2 ≤ Nat.log σ n := by omega
+  have hn_pos : n ≠ 0 := by intro h; subst h; simp at hlog
+  -- 2k ≤ log_σ(n), so σ^(2k) ≤ n
+  have h2k_le_log : 2 * k ≤ Nat.log σ n := by omega
+  have hpow_2k : σ ^ (2 * k) ≤ n := Nat.pow_le_of_le_log hn_pos h2k_le_log
+  -- 2k ≤ σ^k (since 2k ≤ 2^k ≤ σ^k)
+  have h2k_le_sk : 2 * k ≤ σ ^ k := by
+    have hk_le : k ≤ 2 ^ (k - 1) := by
+      have := @Nat.lt_two_pow_self (k - 1); omega
+    have h2_eq : 2 * 2 ^ (k - 1) = 2 ^ k := by
+      have := Nat.two_pow_succ (k - 1)
+      rw [show k - 1 + 1 = k from by omega] at this; omega
+    calc 2 * k ≤ 2 * 2 ^ (k - 1) := Nat.mul_le_mul_left 2 hk_le
+      _ = 2 ^ k := h2_eq
+      _ ≤ σ ^ k := Nat.pow_le_pow_left (by omega) k
+  -- 2 * σ^k * k ≤ n
+  have hhn : 2 * σ ^ k * k ≤ n := calc
+    2 * σ ^ k * k = 2 * k * σ ^ k := mul_right_comm 2 (σ ^ k) k
+    _ ≤ σ ^ k * σ ^ k := Nat.mul_le_mul_right _ h2k_le_sk
+    _ = σ ^ (k + k) := (pow_add σ k k).symm
+    _ = σ ^ (2 * k) := by congr 1; omega
+    _ ≤ n := hpow_2k
+  -- Apply lce_tradeoff: 4 * A.T ≥ k
+  have hT := lce_tradeoff hσ hk hhn A hS
+  -- Combine: 4 · S_bits · T = S_bits · (4T) ≥ S_bits · k ≥ n · k
+  calc 4 * (A.S * Nat.clog 2 n * A.T)
+      = A.S * Nat.clog 2 n * (4 * A.T) :=
+          mul_left_comm 4 (A.S * Nat.clog 2 n) A.T
+    _ ≥ A.S * Nat.clog 2 n * k := Nat.mul_le_mul_left _ hT
+    _ ≥ n * k := Nat.mul_le_mul_right k hSn
